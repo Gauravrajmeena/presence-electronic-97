@@ -1,289 +1,239 @@
 
 import React, { useState, useEffect } from 'react';
-import { Card } from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { useToast } from '@/hooks/use-toast';
+import { useToast } from '@/components/ui/use-toast';
 import { supabase } from '@/integrations/supabase/client';
 import { sendAbsenceNotification } from '@/services/notification/NotificationService';
-import { Bell, CheckCircle, AlertCircle } from 'lucide-react';
+import { NotificationLog } from '@/types/parentNotification';
 
-interface AbsenteeNotifierProps {
-  selectedDate: Date;
-}
-
-interface Absentee {
-  id: string;
-  name: string;
-  hasParentContact: boolean;
-  notified: boolean;
-  notificationId?: string;
-}
-
-const AbsenteeNotifier: React.FC<AbsenteeNotifierProps> = ({ selectedDate }) => {
+const AbsenteeNotifier = () => {
   const { toast } = useToast();
-  const [absentees, setAbsentees] = useState<Absentee[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [sending, setSending] = useState<Record<string, boolean>>({});
-  
-  // Format date for queries and display
-  const formattedDate = selectedDate.toISOString().split('T')[0];
-  const displayDate = selectedDate.toLocaleDateString(undefined, {
-    weekday: 'long',
-    year: 'numeric',
-    month: 'long',
-    day: 'numeric'
-  });
-  
-  // Fetch absentees for the selected date
+  const [absences, setAbsences] = useState<any[]>([]);
+  const [recentNotifications, setRecentNotifications] = useState<NotificationLog[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
+  const [isNotifying, setIsNotifying] = useState(false);
+
+  // Fetch absent students and recent notifications on component mount
   useEffect(() => {
-    const fetchAbsentees = async () => {
-      setLoading(true);
-      try {
-        // Get all records for the selected date
-        const { data: attendanceData, error: attendanceError } = await supabase
-          .from('attendance_records')
-          .select('*')
-          .gte('timestamp', `${formattedDate}T00:00:00`)
-          .lte('timestamp', `${formattedDate}T23:59:59`);
-          
-        if (attendanceError) throw attendanceError;
-        
-        // Filter out absent students
-        const absentRecords = attendanceData?.filter(record => 
-          record.status === 'absent'
-        ) || [];
-        
-        // Get notification logs for this date
-        const { data: notificationData, error: notificationError } = await supabase
-          .from('notification_logs')
-          .select('*')
-          .eq('notification_date', formattedDate);
-          
-        if (notificationError) throw notificationError;
-        
-        // Process each absent student
-        const processedAbsentees = await Promise.all(absentRecords.map(async (record) => {
-          // Extract student info
-          const deviceInfo = record.device_info as any;
-          const name = deviceInfo?.metadata?.name || 'Unknown Student';
-          const studentId = record.user_id || '';
-          
-          // Check if this student has parent contacts
-          const { data: contactData } = await supabase
-            .from('parent_contacts')
-            .select('id')
-            .eq('student_id', studentId);
-            
-          const hasParentContact = contactData && contactData.length > 0;
-          
-          // Check if notification has already been sent
-          const notification = notificationData?.find(n => 
-            n.student_name === name && n.status === 'sent'
-          );
-          
-          return {
-            id: studentId,
-            name,
-            hasParentContact,
-            notified: !!notification,
-            notificationId: notification?.id
-          };
-        }));
-        
-        setAbsentees(processedAbsentees);
-      } catch (error) {
-        console.error('Error fetching absentees:', error);
-        toast({
-          title: 'Error',
-          description: 'Failed to load absent students',
-          variant: 'destructive'
-        });
-      } finally {
-        setLoading(false);
-      }
-    };
-    
-    fetchAbsentees();
-  }, [formattedDate, toast]);
-  
-  // Handle sending notification to a parent
-  const handleSendNotification = async (student: Absentee) => {
-    if (!student.hasParentContact) {
-      toast({
-        title: 'No Contact Available',
-        description: 'This student has no parent contacts registered',
-        variant: 'destructive'
-      });
-      return;
-    }
-    
-    setSending({...sending, [student.id]: true});
-    
+    fetchAbsentStudents();
+    fetchRecentNotifications();
+  }, []);
+
+  // Fetch students marked as absent today
+  const fetchAbsentStudents = async () => {
     try {
-      const success = await sendAbsenceNotification(
-        student.id, 
-        student.name, 
-        formattedDate
-      );
+      setIsLoading(true);
+      const today = new Date().toISOString().split('T')[0];
       
-      if (success) {
-        // Update the student in the absentees list
-        setAbsentees(absentees.map(a => 
-          a.id === student.id
-            ? {...a, notified: true}
-            : a
-        ));
+      const { data, error } = await supabase
+        .from('attendance_records')
+        .select('*, user_id')
+        .eq('status', 'absent')
+        .gte('timestamp', `${today}T00:00:00`)
+        .lte('timestamp', `${today}T23:59:59`);
         
-        toast({
-          title: 'Notification Sent',
-          description: `Successfully notified parent of ${student.name}'s absence`,
-          variant: 'default'
-        });
-      } else {
-        throw new Error('Failed to send notification');
+      if (error) throw error;
+      
+      // Process data to get student info
+      if (data) {
+        const processedData = await Promise.all(
+          data.map(async (record) => {
+            // Try to get student name from profiles
+            const { data: profileData } = await supabase
+              .from('profiles')
+              .select('username')
+              .eq('id', record.user_id)
+              .maybeSingle();
+              
+            return {
+              id: record.id,
+              user_id: record.user_id,
+              timestamp: record.timestamp,
+              student_name: profileData?.username || 'Unknown Student'
+            };
+          })
+        );
+        
+        setAbsences(processedData);
       }
-    } catch (error) {
-      console.error('Error sending notification:', error);
+    } catch (err) {
+      console.error('Error fetching absent students:', err);
       toast({
-        title: 'Notification Failed',
-        description: 'Failed to send absence notification',
+        title: 'Error',
+        description: 'Failed to load absent students',
         variant: 'destructive'
       });
     } finally {
-      setSending({...sending, [student.id]: false});
+      setIsLoading(false);
     }
   };
-  
-  // Handle sending notifications to all parents
-  const handleSendAllNotifications = async () => {
-    // Get students who have contacts but haven't been notified
-    const studentsToNotify = absentees.filter(
-      student => student.hasParentContact && !student.notified
-    );
-    
-    if (studentsToNotify.length === 0) {
+
+  // Fetch recent notifications
+  const fetchRecentNotifications = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('notification_logs' as any)
+        .select('*')
+        .order('created_at', { ascending: false })
+        .limit(5);
+        
+      if (error) throw error;
+      
+      if (data) {
+        setRecentNotifications(data as unknown as NotificationLog[]);
+      }
+    } catch (err) {
+      console.error('Error fetching recent notifications:', err);
+    }
+  };
+
+  // Send notifications to all absent students' parents
+  const notifyAllParents = async () => {
+    if (absences.length === 0) {
       toast({
-        title: 'No Notifications Needed',
-        description: 'No absent students with parent contacts need to be notified',
-        variant: 'default'
+        title: 'No Absences',
+        description: 'There are no absent students to notify about',
       });
       return;
     }
     
-    // Set all selected students to sending state
-    const sendingState: Record<string, boolean> = {};
-    studentsToNotify.forEach(student => {
-      sendingState[student.id] = true;
-    });
-    setSending(sendingState);
-    
-    // Try to send notifications to each student
-    let successCount = 0;
-    let failCount = 0;
-    
-    for (const student of studentsToNotify) {
-      try {
-        const success = await sendAbsenceNotification(
-          student.id,
-          student.name,
-          formattedDate
-        );
-        
-        if (success) {
-          successCount++;
-          // Update the student in the absentees list
-          setAbsentees(prev => prev.map(a => 
-            a.id === student.id
-              ? {...a, notified: true}
-              : a
-          ));
-        } else {
+    try {
+      setIsNotifying(true);
+      let successCount = 0;
+      let failCount = 0;
+      
+      for (const absence of absences) {
+        try {
+          // Get parent contact info
+          const { data: contactData, error: contactError } = await supabase
+            .from('parent_contacts' as any)
+            .select('*')
+            .eq('student_id', absence.user_id)
+            .maybeSingle();
+            
+          if (contactError || !contactData) {
+            console.warn(`No parent contact found for student ${absence.student_name}`);
+            failCount++;
+            continue;
+          }
+          
+          // Send notification
+          const date = new Date(absence.timestamp).toLocaleDateString();
+          const result = await sendAbsenceNotification(
+            absence.user_id,
+            absence.student_name,
+            date
+          );
+          
+          if (result) {
+            successCount++;
+          } else {
+            failCount++;
+          }
+        } catch (err) {
+          console.error(`Error notifying for student ${absence.student_name}:`, err);
           failCount++;
         }
-      } catch (error) {
-        console.error(`Error notifying parent of ${student.name}:`, error);
-        failCount++;
-      } finally {
-        // Clear sending state for this student
-        setSending(prev => ({...prev, [student.id]: false}));
       }
-    }
-    
-    // Show result toast
-    if (successCount > 0) {
+      
+      // Show results
+      if (successCount > 0) {
+        toast({
+          title: 'Notifications Sent',
+          description: `Successfully sent ${successCount} notifications. Failed: ${failCount}`,
+          variant: successCount > 0 ? 'default' : 'destructive'
+        });
+        
+        // Refresh notifications list
+        fetchRecentNotifications();
+      } else {
+        toast({
+          title: 'Notification Failed',
+          description: 'Failed to send any notifications',
+          variant: 'destructive'
+        });
+      }
+    } catch (err) {
+      console.error('Error sending notifications:', err);
       toast({
-        title: 'Notifications Sent',
-        description: `Successfully sent ${successCount} notifications${failCount > 0 ? `, failed to send ${failCount}` : ''}`,
-        variant: 'default'
-      });
-    } else if (failCount > 0) {
-      toast({
-        title: 'Notifications Failed',
-        description: `Failed to send ${failCount} notifications`,
+        title: 'Error',
+        description: 'Failed to send notifications',
         variant: 'destructive'
       });
+    } finally {
+      setIsNotifying(false);
     }
   };
-  
+
   return (
-    <Card className="p-6 mt-4">
-      <div className="flex justify-between items-center mb-4">
-        <h3 className="text-lg font-medium">Absence Notifications</h3>
-        <Button 
-          variant="outline"
-          onClick={handleSendAllNotifications}
-          disabled={absentees.filter(s => s.hasParentContact && !s.notified).length === 0}
-        >
-          <Bell className="h-4 w-4 mr-2" />
-          Notify All Parents
-        </Button>
-      </div>
-      
-      <p className="text-sm text-muted-foreground mb-4">
-        Absences for {displayDate}
-      </p>
-      
-      {loading ? (
-        <p className="text-center py-4 text-muted-foreground">Loading absent students...</p>
-      ) : absentees.length > 0 ? (
-        <div className="divide-y">
-          {absentees.map(student => (
-            <div key={student.id} className="py-3 flex justify-between items-center">
-              <div>
-                <p className="font-medium">{student.name}</p>
-                <div className="flex items-center mt-1">
-                  {student.notified ? (
-                    <span className="text-xs bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-500 px-2 py-1 rounded-full flex items-center">
-                      <CheckCircle className="h-3 w-3 mr-1" />
-                      Notified
-                    </span>
-                  ) : student.hasParentContact ? (
-                    <span className="text-xs bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-500 px-2 py-1 rounded-full">
-                      Not Notified
-                    </span>
-                  ) : (
-                    <span className="text-xs bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-500 px-2 py-1 rounded-full flex items-center">
-                      <AlertCircle className="h-3 w-3 mr-1" />
-                      No Parent Contact
-                    </span>
-                  )}
+    <Card>
+      <CardHeader>
+        <CardTitle>Absence Notifications</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <div className="space-y-4">
+          <div>
+            <h3 className="text-lg font-medium">Absent Students Today</h3>
+            {isLoading ? (
+              <p className="text-muted-foreground py-2">Loading...</p>
+            ) : absences.length > 0 ? (
+              <div className="space-y-2 mt-2">
+                {absences.map((absence) => (
+                  <div key={absence.id} className="flex justify-between items-center border rounded-md p-2">
+                    <div>
+                      <p className="font-medium">{absence.student_name}</p>
+                      <p className="text-sm text-muted-foreground">
+                        Absent since {new Date(absence.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                      </p>
+                    </div>
+                  </div>
+                ))}
+                
+                <div className="mt-4">
+                  <Button 
+                    onClick={notifyAllParents} 
+                    disabled={isNotifying}
+                  >
+                    {isNotifying ? 'Sending Notifications...' : 'Notify All Parents'}
+                  </Button>
                 </div>
               </div>
-              
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => handleSendNotification(student)}
-                disabled={!student.hasParentContact || student.notified || sending[student.id]}
-              >
-                {sending[student.id] ? 'Sending...' : 'Send Notification'}
-              </Button>
-            </div>
-          ))}
+            ) : (
+              <p className="text-muted-foreground py-2">No absent students recorded today.</p>
+            )}
+          </div>
+          
+          <div className="pt-4 border-t">
+            <h3 className="text-lg font-medium mb-2">Recent Notifications</h3>
+            {recentNotifications.length > 0 ? (
+              <div className="space-y-2">
+                {recentNotifications.map((notification: NotificationLog) => (
+                  <div key={notification.id} className="border rounded-md p-2">
+                    <div className="flex justify-between">
+                      <p className="font-medium">{notification.student_name}</p>
+                      <span className={`text-xs px-2 py-1 rounded-full ${
+                        notification.status === 'sent' 
+                          ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-500' 
+                          : 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-500'
+                      }`}>
+                        {notification.status}
+                      </span>
+                    </div>
+                    <p className="text-sm text-muted-foreground">
+                      {new Date(notification.notification_date).toLocaleDateString()}{' '}
+                      {notification.email_status === 'sent' && '📧'}{' '}
+                      {notification.sms_status === 'sent' && '📱'}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-muted-foreground">No recent notifications.</p>
+            )}
+          </div>
         </div>
-      ) : (
-        <p className="text-center py-4 text-muted-foreground">No absent students found for this date</p>
-      )}
+      </CardContent>
     </Card>
   );
 };

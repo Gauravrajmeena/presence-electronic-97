@@ -24,9 +24,9 @@ serve(async (req) => {
     const payload = await req.json()
     const { subject, message, recipient, studentName, date } = payload
     
-    // Log notification attempt
+    // Log notification attempt - using type assertion for the table name
     await supabaseClient
-      .from('notification_logs')
+      .from('notification_logs' as any)
       .insert({
         recipient: recipient,
         subject: subject,
@@ -62,7 +62,7 @@ serve(async (req) => {
         
         // Update log with email success
         await supabaseClient
-          .from('notification_logs')
+          .from('notification_logs' as any)
           .update({ email_status: 'sent' })
           .eq('recipient', recipient)
           .eq('subject', subject)
@@ -70,7 +70,7 @@ serve(async (req) => {
         console.error('Email sending error:', error)
         // Update log with email failure
         await supabaseClient
-          .from('notification_logs')
+          .from('notification_logs' as any)
           .update({ email_status: 'failed', error_details: error.toString() })
           .eq('recipient', recipient)
           .eq('subject', subject)
@@ -86,7 +86,7 @@ serve(async (req) => {
         
         // Update log with SMS success
         await supabaseClient
-          .from('notification_logs')
+          .from('notification_logs' as any)
           .update({ sms_status: 'sent' })
           .eq('recipient', recipient)
           .eq('subject', subject)
@@ -94,7 +94,7 @@ serve(async (req) => {
         console.error('SMS sending error:', error)
         // Update log with SMS failure
         await supabaseClient
-          .from('notification_logs')
+          .from('notification_logs' as any)
           .update({ sms_status: 'failed', error_details: error.toString() })
           .eq('recipient', recipient)
           .eq('subject', subject)
@@ -103,7 +103,7 @@ serve(async (req) => {
     
     // Update final notification status
     await supabaseClient
-      .from('notification_logs')
+      .from('notification_logs' as any)
       .update({
         status: (emailSent || smsSent) ? 'sent' : 'failed',
         completed_at: new Date().toISOString()

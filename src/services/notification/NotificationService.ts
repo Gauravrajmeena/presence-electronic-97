@@ -32,9 +32,9 @@ export async function sendAbsenceNotification(
   try {
     console.log(`Preparing to send absence notification for student ${studentName} (${studentId})`);
     
-    // Fetch parent contact information from database
+    // Fetch parent contact information from database with type assertion
     const { data: contactData, error: contactError } = await supabase
-      .from('parent_contacts')
+      .from('parent_contacts' as any)
       .select('*')
       .eq('student_id', studentId)
       .single();
