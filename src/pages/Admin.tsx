@@ -4,9 +4,11 @@ import PageLayout from '@/components/layouts/PageLayout';
 import { PageHeader } from '@/components/ui/page-header';
 import AdminFacesList from '@/components/admin/AdminFacesList';
 import AttendanceCalendar from '@/components/admin/AttendanceCalendar';
+import ParentContactManagement from '@/components/admin/ParentContactManagement';
+import AbsenteeNotifier from '@/components/admin/AbsenteeNotifier';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { User, Calendar } from 'lucide-react';
+import { User, Calendar, Mail } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 
@@ -16,6 +18,7 @@ const Admin = () => {
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const [activeTab, setActiveTab] = useState('faces');
   const [attendanceUpdated, setAttendanceUpdated] = useState(false);
+  const [selectedDate, setSelectedDate] = useState(new Date());
 
   useEffect(() => {
     // Set up real-time channel for general admin updates
@@ -107,6 +110,10 @@ const Admin = () => {
               </span>
             )}
           </TabsTrigger>
+          <TabsTrigger value="notifications" className="flex items-center gap-2">
+            <Mail className="h-4 w-4" />
+            <span>Parent Notifications</span>
+          </TabsTrigger>
         </TabsList>
         <TabsContent value="faces" className="space-y-4">
           <AdminFacesList 
@@ -121,7 +128,22 @@ const Admin = () => {
           />
         </TabsContent>
         <TabsContent value="calendar">
-          <AttendanceCalendar selectedFaceId={selectedFaceId} />
+          <AttendanceCalendar 
+            selectedFaceId={selectedFaceId} 
+            onDateSelect={(date) => {
+              setSelectedDate(date);
+              if (!selectedFaceId) {
+                setActiveTab('notifications');
+              }
+            }}
+          />
+          
+          {selectedFaceId && (
+            <ParentContactManagement selectedFaceId={selectedFaceId} />
+          )}
+        </TabsContent>
+        <TabsContent value="notifications">
+          <AbsenteeNotifier selectedDate={selectedDate} />
         </TabsContent>
       </Tabs>
     </PageLayout>
