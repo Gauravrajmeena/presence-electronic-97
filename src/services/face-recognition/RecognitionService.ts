@@ -1,6 +1,6 @@
+
 import { supabase } from '@/integrations/supabase/client';
 import { descriptorToString, stringToDescriptor } from './ModelService';
-import { sendAbsenceNotification } from '../notification/NotificationService';
 
 interface Employee {
   id: string;
@@ -17,6 +17,7 @@ interface RecognitionResult {
   confidence?: number;
 }
 
+// Fixed interface for DeviceInfo properly defining the structure
 interface DeviceInfo {
   metadata?: {
     name?: string;
@@ -29,15 +30,17 @@ interface DeviceInfo {
   type?: string;
   timestamp?: string;
   registration?: boolean;
-  firebase_image_url?: string;
+  firebase_image_url?: string; // For the unrecognized face case
 }
 
 export async function recognizeFace(faceDescriptor: Float32Array): Promise<RecognitionResult> {
   try {
     console.log('Starting face recognition process');
     
+    // Convert the descriptor to a string for comparison
     const faceDescriptorString = descriptorToString(faceDescriptor);
     
+    // Query registered faces from attendance_records
     const { data, error } = await supabase
       .from('attendance_records')
       .select('*')
@@ -56,10 +59,12 @@ export async function recognizeFace(faceDescriptor: Float32Array): Promise<Recog
     console.log(`Found ${data.length} registered faces to compare against`);
     
     let bestMatch: any = null;
-    let bestDistance = 0.6;
+    let bestDistance = 0.6; // Threshold distance (lower is better)
     
+    // Compare the face descriptor against all registered faces
     for (const record of data) {
       try {
+        // Type check and safely access properties
         const deviceInfo = record.device_info as DeviceInfo | null;
         
         if (
@@ -79,6 +84,7 @@ export async function recognizeFace(faceDescriptor: Float32Array): Promise<Recog
         }
       } catch (e) {
         console.error('Error processing record:', e);
+        // Continue with the next record
       }
     }
     
@@ -117,6 +123,7 @@ export async function recognizeFace(faceDescriptor: Float32Array): Promise<Recog
   }
 }
 
+// Calculate Euclidean distance between two face descriptors
 function calculateDistance(descriptor1: Float32Array, descriptor2: Float32Array): number {
   if (descriptor1.length !== descriptor2.length) {
     throw new Error('Face descriptors have different dimensions');
@@ -131,86 +138,41 @@ function calculateDistance(descriptor1: Float32Array, descriptor2: Float32Array)
   return Math.sqrt(sum);
 }
 
-export const recordAttendance = async (
+export async function recordAttendance(
   userId: string,
-  status: 'present' | 'unauthorized',
-  confidenceScore: number = 0
-): Promise<boolean> => {
+  status: 'present' | 'late' | 'absent',
+  confidence?: number
+): Promise<any> {
   try {
-    const today = new Date().toISOString().split('T')[0];
+    console.log(`Recording attendance for user ${userId} with status ${status}`);
     
-    const { data: existingRecord, error: checkError } = await supabase
-      .from('attendance_records')
-      .select('id')
-      .eq('user_id', userId)
-      .eq('status', status)
-      .gte('timestamp', `${today}T00:00:00`)
-      .lte('timestamp', `${today}T23:59:59`)
-      .maybeSingle();
-      
-    if (checkError) {
-      throw new Error(`Error checking existing attendance: ${checkError.message}`);
-    }
-    
-    if (existingRecord) {
-      console.log(`Attendance already recorded for user ${userId} today with status ${status}`);
-      return true;
-    }
-    
+    const timestamp = new Date().toISOString();
     const deviceInfo = {
-      userAgent: navigator.userAgent,
-      timestamp: new Date().toISOString(),
-      confidenceScore: confidenceScore,
+      type: 'webcam',
+      timestamp,
+      confidence
     };
     
-    const { error: insertError } = await supabase
+    const { data, error } = await supabase
       .from('attendance_records')
       .insert({
         user_id: userId,
+        timestamp,
         status,
-        confidence_score: confidenceScore,
-        device_info: deviceInfo
-      });
-      
-    if (insertError) {
-      throw new Error(`Error recording attendance: ${insertError.message}`);
+        device_info: deviceInfo,
+      })
+      .select()
+      .single();
+    
+    if (error) {
+      console.error('Error recording attendance:', error);
+      throw new Error(`Failed to record attendance: ${error.message}`);
     }
     
-    if (status === 'present') {
-      const { data: userData, error: userError } = await supabase
-        .from('attendance_records')
-        .select('device_info')
-        .eq('user_id', userId)
-        .contains('device_info', { registration: true })
-        .maybeSingle();
-        
-      if (!userError && userData) {
-        const deviceInfo = userData.device_info as any;
-        const metadata = deviceInfo?.metadata || {};
-        const studentName = metadata.name || 'Unknown Student';
-        
-        const now = new Date();
-        const hour = now.getHours();
-        const minutes = now.getMinutes();
-        
-        const isLate = hour > 9 || (hour === 9 && minutes > 30);
-        
-        if (isLate) {
-          console.log(`Late arrival recorded for ${studentName}`);
-          
-          try {
-            await sendAbsenceNotification(userId, studentName, new Date());
-          } catch (notifyError) {
-            console.error('Error sending late arrival notification:', notifyError);
-          }
-        }
-      }
-    }
-    
-    console.log(`Attendance recorded successfully for user ${userId} with status ${status}`);
-    return true;
+    console.log('Attendance recorded successfully:', data);
+    return data;
   } catch (error) {
-    console.error('Error recording attendance:', error);
-    return false;
+    console.error('Error in recordAttendance:', error);
+    throw error;
   }
-};
+}
