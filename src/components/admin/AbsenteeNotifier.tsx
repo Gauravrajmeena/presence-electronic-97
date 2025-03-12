@@ -1,63 +1,66 @@
-
 import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Calendar } from '@/components/ui/calendar';
+import { Input } from '@/components/ui/input';
+import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
 import { format } from 'date-fns';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { toast } from 'sonner';
-import { sendAbsenceNotification } from '@/services/notification/NotificationService';
+import { Calendar } from '@/components/ui/calendar';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { CalendarIcon, Loader2 } from 'lucide-react';
+import { cn } from '@/lib/utils';
 import { supabase } from '@/integrations/supabase/client';
+import { sendAbsenceNotification } from '@/services/notification/NotificationService';
 import { NotificationLog } from '@/types/parentNotification';
 
 const AbsenteeNotifier = () => {
-  const [date, setDate] = useState<Date>(new Date());
-  const [absentees, setAbsentees] = useState<any[]>([]);
-  const [selectedAbsentees, setSelectedAbsentees] = useState<string[]>([]);
+  const [studentId, setStudentId] = useState('');
+  const [studentName, setStudentName] = useState('');
+  const [date, setDate] = useState<Date | undefined>(new Date());
+  const [isSending, setIsSending] = useState(false);
   const [notificationLogs, setNotificationLogs] = useState<NotificationLog[]>([]);
   const [loading, setLoading] = useState(false);
-  const [fetchingLogs, setFetchingLogs] = useState(false);
 
   useEffect(() => {
-    fetchAbsentees(date);
     fetchNotificationLogs();
-  }, [date]);
+  }, []);
 
-  const fetchAbsentees = async (selectedDate: Date) => {
-    setLoading(true);
+  const handleSendNotification = async () => {
+    if (!studentId || !studentName || !date) {
+      toast.error('Please fill in all fields.');
+      return;
+    }
+
+    setIsSending(true);
     try {
-      const dateString = format(selectedDate, 'yyyy-MM-dd');
-      
-      // Fetch attendance records marked as absent for the selected date
-      const { data, error } = await supabase
-        .from('attendance_records')
-        .select('*, face_profiles!inner(*)')
-        .eq('status', 'absent')
-        .like('timestamp', `${dateString}%`);
-
-      if (error) throw error;
-      
-      setAbsentees(data || []);
-      setSelectedAbsentees([]);
+      const formattedDate = format(date, 'yyyy-MM-dd');
+      const success = await sendAbsenceNotification(studentId, studentName, formattedDate);
+      if (success) {
+        toast.success('Absence notification sent successfully!');
+        fetchNotificationLogs(); // Refresh logs after sending
+      } else {
+        toast.error('Failed to send absence notification.');
+      }
     } catch (error) {
-      console.error('Error fetching absentees:', error);
-      toast.error('Failed to load absent students');
+      console.error('Error sending absence notification:', error);
+      toast.error('Error sending absence notification.');
     } finally {
-      setLoading(false);
+      setIsSending(false);
     }
   };
 
   const fetchNotificationLogs = async () => {
-    setFetchingLogs(true);
     try {
+      setLoading(true);
+      
       const { data, error } = await supabase
         .from('notification_logs' as any)
         .select('*')
-        .order('notification_date', { ascending: false })
-        .limit(10);
+        .order('notification_date', { ascending: false });
 
       if (error) throw error;
       
@@ -66,68 +69,6 @@ const AbsenteeNotifier = () => {
     } catch (error) {
       console.error('Error fetching notification logs:', error);
     } finally {
-      setFetchingLogs(false);
-    }
-  };
-
-  const handleSelectAbsentee = (studentId: string) => {
-    setSelectedAbsentees(prev => 
-      prev.includes(studentId) 
-        ? prev.filter(id => id !== studentId) 
-        : [...prev, studentId]
-    );
-  };
-
-  const handleSelectAll = () => {
-    if (selectedAbsentees.length === absentees.length) {
-      setSelectedAbsentees([]);
-    } else {
-      setSelectedAbsentees(absentees.map(student => student.id));
-    }
-  };
-
-  const sendNotifications = async () => {
-    if (selectedAbsentees.length === 0) {
-      toast.warning('No absentees selected');
-      return;
-    }
-
-    setLoading(true);
-    let successCount = 0;
-    let failCount = 0;
-
-    try {
-      // Send notification for each selected absentee
-      for (const studentId of selectedAbsentees) {
-        const student = absentees.find(a => a.id === studentId);
-        if (!student) continue;
-
-        const success = await sendAbsenceNotification(
-          student.user_id,
-          student.face_profiles?.name || 'Unknown Student',
-          format(date, 'yyyy-MM-dd')
-        );
-
-        if (success) {
-          successCount++;
-        } else {
-          failCount++;
-        }
-      }
-
-      if (successCount > 0) {
-        toast.success(`Successfully sent ${successCount} absence notifications`);
-      }
-      
-      if (failCount > 0) {
-        toast.error(`Failed to send ${failCount} notifications`);
-      }
-
-      fetchNotificationLogs();
-    } catch (error) {
-      console.error('Error sending notifications:', error);
-      toast.error('Failed to send notifications');
-    } finally {
       setLoading(false);
     }
   };
@@ -135,113 +76,94 @@ const AbsenteeNotifier = () => {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Absence Notifications</CardTitle>
+        <CardTitle>Absentee Notifier</CardTitle>
       </CardHeader>
-      <CardContent>
-        <Tabs defaultValue="send">
-          <TabsList className="mb-4">
-            <TabsTrigger value="send">Send Notifications</TabsTrigger>
-            <TabsTrigger value="logs">Notification Logs</TabsTrigger>
-          </TabsList>
-          
-          <TabsContent value="send" className="space-y-4">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <Label className="block mb-2">Select Date</Label>
-                <Calendar
-                  mode="single"
-                  selected={date}
-                  onSelect={(date) => date && setDate(date)}
-                  className="border rounded-md"
-                />
-              </div>
-              
-              <div>
-                <div className="flex items-center justify-between mb-2">
-                  <Label>Absent Students ({absentees.length})</Label>
-                  {absentees.length > 0 && (
-                    <Button 
-                      variant="outline" 
-                      size="sm" 
-                      onClick={handleSelectAll}
-                    >
-                      {selectedAbsentees.length === absentees.length ? 'Deselect All' : 'Select All'}
-                    </Button>
-                  )}
-                </div>
-                
-                {loading ? (
-                  <p>Loading absentees...</p>
-                ) : absentees.length === 0 ? (
-                  <div className="border rounded-md p-4 text-center">
-                    <p>No absent students found for this date.</p>
-                  </div>
-                ) : (
-                  <div className="border rounded-md p-2 max-h-[300px] overflow-y-auto space-y-2">
-                    {absentees.map((student) => (
-                      <div 
-                        key={student.id} 
-                        className="flex items-center space-x-2 p-2 hover:bg-muted rounded-md"
-                      >
-                        <Checkbox 
-                          checked={selectedAbsentees.includes(student.id)}
-                          onCheckedChange={() => handleSelectAbsentee(student.id)}
-                          id={`student-${student.id}`}
-                        />
-                        <Label 
-                          htmlFor={`student-${student.id}`}
-                          className="flex-1 cursor-pointer"
-                        >
-                          {student.face_profiles?.name || 'Unknown Student'}
-                        </Label>
-                      </div>
-                    ))}
-                  </div>
+      <CardContent className="space-y-4">
+        <div className="space-y-2">
+          <Label htmlFor="student-id">Student ID</Label>
+          <Input
+            id="student-id"
+            placeholder="Enter student ID"
+            value={studentId}
+            onChange={(e) => setStudentId(e.target.value)}
+          />
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="student-name">Student Name</Label>
+          <Input
+            id="student-name"
+            placeholder="Enter student name"
+            value={studentName}
+            onChange={(e) => setStudentName(e.target.value)}
+          />
+        </div>
+        <div className="space-y-2">
+          <Label>Date of Absence</Label>
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button
+                variant={'outline'}
+                className={cn(
+                  'w-[240px] justify-start text-left font-normal',
+                  !date && 'text-muted-foreground'
                 )}
-                
-                <Button 
-                  className="w-full mt-4" 
-                  disabled={loading || selectedAbsentees.length === 0}
-                  onClick={sendNotifications}
-                >
-                  Send Notifications ({selectedAbsentees.length})
-                </Button>
-              </div>
-            </div>
-          </TabsContent>
-          
-          <TabsContent value="logs">
-            {fetchingLogs ? (
-              <p>Loading notification logs...</p>
-            ) : notificationLogs.length === 0 ? (
-              <p>No notification logs found.</p>
-            ) : (
-              <div className="space-y-4">
-                {notificationLogs.map((log) => (
-                  <div key={log.id} className="border rounded-md p-4">
-                    <div className="flex justify-between">
-                      <div>
-                        <h4 className="font-medium">{log.student_name}</h4>
-                        <p className="text-sm text-gray-500">{log.subject}</p>
+              >
+                <CalendarIcon className="mr-2 h-4 w-4" />
+                {date ? format(date, 'PPP') : <span>Pick a date</span>}
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-auto p-0" align="center" side="bottom">
+              <Calendar
+                mode="single"
+                selected={date}
+                onSelect={setDate}
+                disabled={(date) =>
+                  date > new Date() || date < new Date('2020-01-01')
+                }
+                initialFocus
+              />
+            </PopoverContent>
+          </Popover>
+        </div>
+        <Button onClick={handleSendNotification} disabled={isSending}>
+          {isSending ? (
+            <>
+              Sending <Loader2 className="ml-2 h-4 w-4 animate-spin" />
+            </>
+          ) : (
+            'Send Notification'
+          )}
+        </Button>
+
+        <div className="mt-6">
+          <h3 className="text-lg font-medium mb-4">Notification Logs</h3>
+          {loading ? (
+            <p>Loading logs...</p>
+          ) : notificationLogs.length === 0 ? (
+            <p>No notifications sent yet.</p>
+          ) : (
+            <div className="space-y-4">
+              {notificationLogs.map((log) => (
+                <div key={log.id} className="border rounded-md p-4">
+                  <div className="flex justify-between items-start">
+                    <div>
+                      <h4 className="font-medium">{log.subject}</h4>
+                      <p className="text-sm text-gray-500">Student: {log.student_name}</p>
+                      <p className="text-sm text-gray-500">Date: {log.notification_date}</p>
+                      <div className="mt-2">
+                        <p className="text-sm">Recipient Email: {log.recipient.email || 'N/A'}</p>
+                        <p className="text-sm">Recipient Phone: {log.recipient.phone || 'N/A'}</p>
                       </div>
-                      <Badge variant={log.status === 'sent' ? 'success' : 'destructive'}>
-                        {log.status}
-                      </Badge>
                     </div>
-                    <p className="text-sm mt-2">
-                      {log.recipient.email && `Email: ${log.recipient.email}`}
-                      {log.recipient.email && log.recipient.phone && ' | '}
-                      {log.recipient.phone && `SMS: ${log.recipient.phone}`}
-                    </p>
-                    <p className="text-sm text-gray-500 mt-1">
-                      {new Date(log.notification_date).toLocaleString()}
-                    </p>
+                    <div>
+                      <Badge variant="secondary">{log.status}</Badge>
+                    </div>
                   </div>
-                ))}
-              </div>
-            )}
-          </TabsContent>
-        </Tabs>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
       </CardContent>
     </Card>
   );

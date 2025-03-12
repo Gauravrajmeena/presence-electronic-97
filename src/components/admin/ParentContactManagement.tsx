@@ -40,11 +40,12 @@ const ParentContactManagement = () => {
 
       if (error) throw error;
 
-      // Process data with type safety
+      // Process data with type safety - using any to bypass the TypeScript error
       const parsedContacts: ParentContact[] = [];
       if (data && Array.isArray(data)) {
-        for (const contact of data) {
+        for (const contact of data as any[]) {
           try {
+            // Each contact object from Supabase needs to be properly shaped for our ParentContact type
             parsedContacts.push({
               id: contact.id,
               student_id: contact.student_id,
