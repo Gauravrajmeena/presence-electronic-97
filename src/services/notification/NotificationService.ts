@@ -1,17 +1,6 @@
 
 import { supabase } from '@/integrations/supabase/client';
-
-interface ParentContact {
-  id: string;
-  student_id: string;
-  name: string;
-  email: string;
-  phone: string;
-  notification_preferences: {
-    email: boolean;
-    sms: boolean;
-  };
-}
+import { ParentContact } from '@/types/parentNotification';
 
 interface NotificationPayload {
   subject: string;
@@ -32,7 +21,7 @@ export async function sendAbsenceNotification(
   try {
     console.log(`Preparing to send absence notification for student ${studentName} (${studentId})`);
     
-    // Fetch parent contact information from database with type assertion
+    // Fetch parent contact information from database
     const { data: contactData, error: contactError } = await supabase
       .from('parent_contacts' as any)
       .select('*')

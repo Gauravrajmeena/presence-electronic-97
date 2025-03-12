@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { Calendar } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
@@ -22,10 +23,10 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { CalendarIcon, ChevronLeft, ChevronRight, Users } from "lucide-react"
-import { PageLayout } from '@/components/layouts/PageLayout';
+import PageLayout from '@/components/layouts/PageLayout';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { supabase } from '@/integrations/supabase/client';
-import { AttendanceCalendar } from '@/components/admin/AttendanceCalendar';
+import AttendanceCalendar from '@/components/admin/AttendanceCalendar';
 import StatsOverview from '@/components/dashboard/StatsOverview';
 import StatusChart from '@/components/dashboard/StatusChart';
 import WeeklyChart from '@/components/dashboard/WeeklyChart';

@@ -1,501 +1,416 @@
 
-import React, { useEffect, useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
-import { Separator } from '@/components/ui/separator';
-import { useToast } from '@/components/ui/use-toast';
-import { Pencil, Trash2, X, Check, Plus } from 'lucide-react';
+import { toast } from 'sonner';
 import { supabase } from '@/integrations/supabase/client';
-import { ParentContact, parseNotificationPreferences } from '@/types/parentNotification';
 import { sendTestNotification } from '@/services/notification/NotificationService';
+import { parseNotificationPreferences, ParentContact } from '@/types/parentNotification';
 
 const ParentContactManagement = () => {
-  const { toast } = useToast();
   const [contacts, setContacts] = useState<ParentContact[]>([]);
-  const [isEditing, setIsEditing] = useState<string | null>(null);
-  const [isAddingNew, setIsAddingNew] = useState(false);
-  const [formData, setFormData] = useState<Partial<ParentContact>>({
+  const [loading, setLoading] = useState(true);
+  const [newContact, setNewContact] = useState({
+    student_id: '',
     name: '',
     email: '',
     phone: '',
-    student_id: '',
     notification_preferences: {
       email: true,
-      sms: true
+      sms: false
     }
   });
-  
-  // Fetch contacts on component mount
+  const [selectedContact, setSelectedContact] = useState<ParentContact | null>(null);
+  const [isEditing, setIsEditing] = useState(false);
+
   useEffect(() => {
     fetchContacts();
   }, []);
-  
-  // Fetch parent contacts from the database
+
   const fetchContacts = async () => {
     try {
+      setLoading(true);
       const { data, error } = await supabase
         .from('parent_contacts' as any)
         .select('*');
-        
+
       if (error) throw error;
+
+      // Parse notification preferences for each contact
+      const parsedContacts = data?.map(contact => ({
+        ...contact,
+        notification_preferences: parseNotificationPreferences(contact.notification_preferences)
+      })) as ParentContact[];
       
-      if (data) {
-        // Transform the data and parse notification preferences
-        const processedContacts = data.map(contact => {
-          // Ensure notification_preferences is properly parsed
-          let preferences = { email: false, sms: false };
-          
-          try {
-            if (contact.notification_preferences) {
-              preferences = parseNotificationPreferences(contact.notification_preferences);
-            }
-          } catch (e) {
-            console.error('Error parsing preferences', e);
-          }
-          
-          return {
-            ...contact,
-            notification_preferences: preferences
-          } as ParentContact;
-        });
-        
-        setContacts(processedContacts);
-      }
-    } catch (err) {
-      console.error('Error fetching parent contacts:', err);
-      toast({
-        title: 'Error',
-        description: 'Failed to load parent contacts',
-        variant: 'destructive'
-      });
+      setContacts(parsedContacts || []);
+    } catch (error) {
+      console.error('Error fetching parent contacts:', error);
+      toast.error('Failed to load parent contacts');
+    } finally {
+      setLoading(false);
     }
   };
-  
-  // Handle form input changes
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const { name, value } = e.target;
-    setFormData(prev => ({
-      ...prev,
-      [name]: value
-    }));
-  };
-  
-  // Handle notification preferences toggle
-  const handleTogglePreference = (type: 'email' | 'sms') => {
-    setFormData(prev => ({
-      ...prev,
-      notification_preferences: {
-        ...prev.notification_preferences,
-        [type]: !prev.notification_preferences?.[type]
-      }
-    }));
-  };
-  
-  // Add new contact
-  const handleAddContact = async () => {
+
+  const handleAddContact = async (e: React.FormEvent) => {
+    e.preventDefault();
     try {
-      // Validate form data
-      if (!formData.name || !formData.student_id) {
-        toast({
-          title: 'Validation Error',
-          description: 'Name and Student ID are required',
-          variant: 'destructive'
-        });
-        return;
-      }
+      setLoading(true);
       
-      // Insert new contact
-      const { data, error } = await supabase
+      const { error } = await supabase
         .from('parent_contacts' as any)
         .insert({
-          student_id: formData.student_id,
-          name: formData.name,
-          email: formData.email || '',
-          phone: formData.phone || '',
-          notification_preferences: formData.notification_preferences
-        } as any)
-        .select();
-        
+          student_id: newContact.student_id,
+          name: newContact.name,
+          email: newContact.email,
+          phone: newContact.phone,
+          notification_preferences: newContact.notification_preferences
+        } as any);
+
       if (error) throw error;
-      
-      toast({
-        title: 'Success',
-        description: 'Parent contact added successfully',
-      });
-      
-      // Reset form and refresh contacts
-      setFormData({
+
+      toast.success('Parent contact added successfully');
+      setNewContact({
+        student_id: '',
         name: '',
         email: '',
         phone: '',
-        student_id: '',
         notification_preferences: {
           email: true,
-          sms: true
+          sms: false
         }
       });
-      setIsAddingNew(false);
       fetchContacts();
-    } catch (err) {
-      console.error('Error adding parent contact:', err);
-      toast({
-        title: 'Error',
-        description: 'Failed to add parent contact',
-        variant: 'destructive'
-      });
+    } catch (error) {
+      console.error('Error adding parent contact:', error);
+      toast.error('Failed to add parent contact');
+    } finally {
+      setLoading(false);
     }
   };
-  
-  // Update existing contact
-  const handleUpdateContact = async (id: string) => {
+
+  const handleEditContact = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedContact) return;
+    
     try {
+      setLoading(true);
+      
       const { error } = await supabase
         .from('parent_contacts' as any)
         .update({
-          name: formData.name,
-          email: formData.email,
-          phone: formData.phone,
-          notification_preferences: formData.notification_preferences
+          name: selectedContact.name,
+          email: selectedContact.email,
+          phone: selectedContact.phone,
+          notification_preferences: selectedContact.notification_preferences
         } as any)
-        .eq('id', id);
-        
+        .eq('id', selectedContact.id);
+
       if (error) throw error;
-      
-      toast({
-        title: 'Success',
-        description: 'Parent contact updated successfully',
-      });
-      
-      setIsEditing(null);
+
+      toast.success('Parent contact updated successfully');
+      setIsEditing(false);
+      setSelectedContact(null);
       fetchContacts();
-    } catch (err) {
-      console.error('Error updating parent contact:', err);
-      toast({
-        title: 'Error',
-        description: 'Failed to update parent contact',
-        variant: 'destructive'
-      });
+    } catch (error) {
+      console.error('Error updating parent contact:', error);
+      toast.error('Failed to update parent contact');
+    } finally {
+      setLoading(false);
     }
   };
-  
-  // Delete contact
+
   const handleDeleteContact = async (id: string) => {
-    if (!confirm('Are you sure you want to delete this contact?')) return;
-    
     try {
+      setLoading(true);
+      
       const { error } = await supabase
         .from('parent_contacts' as any)
         .delete()
         .eq('id', id);
-        
+
       if (error) throw error;
-      
-      toast({
-        title: 'Success',
-        description: 'Parent contact deleted successfully',
-      });
-      
+
+      toast.success('Parent contact deleted successfully');
       fetchContacts();
-    } catch (err) {
-      console.error('Error deleting parent contact:', err);
-      toast({
-        title: 'Error',
-        description: 'Failed to delete parent contact',
-        variant: 'destructive'
-      });
+    } catch (error) {
+      console.error('Error deleting parent contact:', error);
+      toast.error('Failed to delete parent contact');
+    } finally {
+      setLoading(false);
     }
   };
-  
-  // Set up editing state
-  const handleEdit = (contact: ParentContact) => {
-    setFormData({
-      name: contact.name,
-      email: contact.email,
-      phone: contact.phone,
-      student_id: contact.student_id,
-      notification_preferences: contact.notification_preferences
-    });
-    setIsEditing(contact.id);
-  };
-  
-  // Send test notification
-  const handleSendTest = async (contact: ParentContact) => {
+
+  const handleSendTestNotification = async (contact: ParentContact) => {
     try {
-      toast({
-        title: 'Sending Test',
-        description: 'Sending test notification...',
-      });
+      setLoading(true);
+      const success = await sendTestNotification(contact);
       
-      const result = await sendTestNotification(contact);
-      
-      if (result) {
-        toast({
-          title: 'Success',
-          description: 'Test notification sent successfully',
-        });
+      if (success) {
+        toast.success('Test notification sent successfully');
       } else {
-        throw new Error('Failed to send notification');
+        toast.error('Failed to send test notification');
       }
-    } catch (err) {
-      console.error('Error sending test notification:', err);
-      toast({
-        title: 'Error',
-        description: 'Failed to send test notification',
-        variant: 'destructive'
-      });
+    } catch (error) {
+      console.error('Error sending test notification:', error);
+      toast.error('Failed to send test notification');
+    } finally {
+      setLoading(false);
     }
   };
-  
+
   return (
-    <Card className="mb-6">
-      <CardHeader className="flex flex-row items-center justify-between">
-        <CardTitle>Parent Contacts</CardTitle>
-        <Button 
-          size="sm" 
-          onClick={() => {
-            setFormData({
-              name: '',
-              email: '',
-              phone: '',
-              student_id: '',
-              notification_preferences: {
-                email: true,
-                sms: true
-              }
-            });
-            setIsAddingNew(true);
-          }}
-          disabled={isAddingNew}
-        >
-          <Plus className="h-4 w-4 mr-2" />
-          Add New
-        </Button>
+    <Card>
+      <CardHeader>
+        <CardTitle>Parent Contact Management</CardTitle>
       </CardHeader>
-      <CardContent>
-        {isAddingNew && (
-          <div className="border rounded-lg p-4 mb-4">
-            <h4 className="font-medium mb-3">Add New Contact</h4>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-              <div>
-                <Label htmlFor="student_id">Student ID</Label>
+      <CardContent className="space-y-6">
+        {!isEditing ? (
+          <form onSubmit={handleAddContact} className="space-y-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="student-id">Student ID</Label>
                 <Input 
-                  id="student_id" 
-                  name="student_id" 
-                  value={formData.student_id || ''} 
-                  onChange={handleChange} 
-                  className="mt-1" 
+                  id="student-id" 
+                  value={newContact.student_id}
+                  onChange={(e) => setNewContact({...newContact, student_id: e.target.value})}
+                  placeholder="Enter student ID"
+                  required
                 />
               </div>
-              <div>
-                <Label htmlFor="name">Parent/Guardian Name</Label>
+              <div className="space-y-2">
+                <Label htmlFor="parent-name">Parent Name</Label>
                 <Input 
-                  id="name" 
-                  name="name" 
-                  value={formData.name || ''} 
-                  onChange={handleChange} 
-                  className="mt-1" 
+                  id="parent-name" 
+                  value={newContact.name}
+                  onChange={(e) => setNewContact({...newContact, name: e.target.value})}
+                  placeholder="Enter parent name"
+                  required
                 />
               </div>
-              <div>
-                <Label htmlFor="email">Email</Label>
+              <div className="space-y-2">
+                <Label htmlFor="parent-email">Email</Label>
                 <Input 
-                  id="email" 
-                  name="email" 
-                  type="email" 
-                  value={formData.email || ''} 
-                  onChange={handleChange} 
-                  className="mt-1" 
+                  id="parent-email" 
+                  type="email"
+                  value={newContact.email}
+                  onChange={(e) => setNewContact({...newContact, email: e.target.value})}
+                  placeholder="Enter email address"
+                  required
                 />
               </div>
-              <div>
-                <Label htmlFor="phone">Phone</Label>
+              <div className="space-y-2">
+                <Label htmlFor="parent-phone">Phone Number</Label>
                 <Input 
-                  id="phone" 
-                  name="phone" 
-                  value={formData.phone || ''} 
-                  onChange={handleChange} 
-                  className="mt-1"
+                  id="parent-phone" 
+                  value={newContact.phone}
+                  onChange={(e) => setNewContact({...newContact, phone: e.target.value})}
+                  placeholder="Enter phone number"
+                  required
                 />
               </div>
             </div>
             
-            <div className="space-y-2 mb-4">
+            <div className="space-y-2">
               <Label>Notification Preferences</Label>
-              <div className="flex items-center space-x-2">
-                <Switch 
-                  id="email_pref" 
-                  checked={formData.notification_preferences?.email || false}
-                  onCheckedChange={() => handleTogglePreference('email')}
-                />
-                <Label htmlFor="email_pref">Email Notifications</Label>
-              </div>
-              <div className="flex items-center space-x-2">
-                <Switch 
-                  id="sms_pref" 
-                  checked={formData.notification_preferences?.sms || false}
-                  onCheckedChange={() => handleTogglePreference('sms')}
-                />
-                <Label htmlFor="sms_pref">SMS Notifications</Label>
+              <div className="flex space-x-4">
+                <div className="flex items-center space-x-2">
+                  <Checkbox 
+                    id="email-notification" 
+                    checked={newContact.notification_preferences.email}
+                    onCheckedChange={(checked) => 
+                      setNewContact({
+                        ...newContact, 
+                        notification_preferences: {
+                          ...newContact.notification_preferences,
+                          email: checked as boolean
+                        }
+                      })
+                    }
+                  />
+                  <Label htmlFor="email-notification">Email</Label>
+                </div>
+                <div className="flex items-center space-x-2">
+                  <Checkbox 
+                    id="sms-notification" 
+                    checked={newContact.notification_preferences.sms}
+                    onCheckedChange={(checked) => 
+                      setNewContact({
+                        ...newContact, 
+                        notification_preferences: {
+                          ...newContact.notification_preferences,
+                          sms: checked as boolean
+                        }
+                      })
+                    }
+                  />
+                  <Label htmlFor="sms-notification">SMS</Label>
+                </div>
               </div>
             </div>
             
-            <div className="flex justify-end space-x-2">
-              <Button variant="outline" onClick={() => setIsAddingNew(false)}>
+            <Button type="submit" disabled={loading}>Add Contact</Button>
+          </form>
+        ) : (
+          <form onSubmit={handleEditContact} className="space-y-4">
+            {/* Edit form fields similar to add form */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="edit-parent-name">Parent Name</Label>
+                <Input 
+                  id="edit-parent-name" 
+                  value={selectedContact?.name || ''}
+                  onChange={(e) => setSelectedContact(selectedContact ? {...selectedContact, name: e.target.value} : null)}
+                  placeholder="Enter parent name"
+                  required
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="edit-parent-email">Email</Label>
+                <Input 
+                  id="edit-parent-email" 
+                  type="email"
+                  value={selectedContact?.email || ''}
+                  onChange={(e) => setSelectedContact(selectedContact ? {...selectedContact, email: e.target.value} : null)}
+                  placeholder="Enter email address"
+                  required
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="edit-parent-phone">Phone Number</Label>
+                <Input 
+                  id="edit-parent-phone" 
+                  value={selectedContact?.phone || ''}
+                  onChange={(e) => setSelectedContact(selectedContact ? {...selectedContact, phone: e.target.value} : null)}
+                  placeholder="Enter phone number"
+                  required
+                />
+              </div>
+            </div>
+            
+            <div className="space-y-2">
+              <Label>Notification Preferences</Label>
+              <div className="flex space-x-4">
+                <div className="flex items-center space-x-2">
+                  <Checkbox 
+                    id="edit-email-notification" 
+                    checked={selectedContact?.notification_preferences.email}
+                    onCheckedChange={(checked) => {
+                      if (selectedContact) {
+                        setSelectedContact({
+                          ...selectedContact, 
+                          notification_preferences: {
+                            ...selectedContact.notification_preferences,
+                            email: checked as boolean
+                          }
+                        });
+                      }
+                    }}
+                  />
+                  <Label htmlFor="edit-email-notification">Email</Label>
+                </div>
+                <div className="flex items-center space-x-2">
+                  <Checkbox 
+                    id="edit-sms-notification" 
+                    checked={selectedContact?.notification_preferences.sms}
+                    onCheckedChange={(checked) => {
+                      if (selectedContact) {
+                        setSelectedContact({
+                          ...selectedContact, 
+                          notification_preferences: {
+                            ...selectedContact.notification_preferences,
+                            sms: checked as boolean
+                          }
+                        });
+                      }
+                    }}
+                  />
+                  <Label htmlFor="edit-sms-notification">SMS</Label>
+                </div>
+              </div>
+            </div>
+            
+            <div className="flex space-x-2">
+              <Button type="submit" disabled={loading}>Save Changes</Button>
+              <Button 
+                type="button" 
+                variant="outline" 
+                onClick={() => {
+                  setIsEditing(false);
+                  setSelectedContact(null);
+                }}
+              >
                 Cancel
               </Button>
-              <Button onClick={handleAddContact}>
-                Save Contact
-              </Button>
             </div>
-          </div>
+          </form>
         )}
         
-        {contacts.length > 0 ? (
-          <div className="space-y-4">
-            {contacts.map(contact => (
-              <div 
-                key={contact.id} 
-                className="border rounded-lg p-4"
-              >
-                {isEditing === contact.id ? (
-                  <div className="space-y-4">
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      <div>
-                        <Label htmlFor={`edit_name_${contact.id}`}>Name</Label>
-                        <Input 
-                          id={`edit_name_${contact.id}`} 
-                          name="name" 
-                          value={formData.name || ''} 
-                          onChange={handleChange} 
-                          className="mt-1" 
-                        />
+        <div className="mt-6">
+          <h3 className="text-lg font-medium mb-4">Parent Contacts</h3>
+          
+          {loading ? (
+            <p>Loading contacts...</p>
+          ) : contacts.length === 0 ? (
+            <p>No parent contacts found.</p>
+          ) : (
+            <div className="space-y-4">
+              {contacts.map((contact) => (
+                <div key={contact.id} className="border rounded-md p-4">
+                  <div className="flex justify-between items-start">
+                    <div>
+                      <h4 className="font-medium">{contact.name}</h4>
+                      <p className="text-sm text-gray-500">Student ID: {contact.student_id}</p>
+                      <div className="mt-2">
+                        <p className="text-sm">Email: {contact.email}</p>
+                        <p className="text-sm">Phone: {contact.phone}</p>
                       </div>
-                      <div>
-                        <Label htmlFor={`edit_email_${contact.id}`}>Email</Label>
-                        <Input 
-                          id={`edit_email_${contact.id}`} 
-                          name="email" 
-                          value={formData.email || ''} 
-                          onChange={handleChange} 
-                          className="mt-1" 
-                        />
-                      </div>
-                      <div>
-                        <Label htmlFor={`edit_phone_${contact.id}`}>Phone</Label>
-                        <Input 
-                          id={`edit_phone_${contact.id}`} 
-                          name="phone" 
-                          value={formData.phone || ''} 
-                          onChange={handleChange} 
-                          className="mt-1" 
-                        />
-                      </div>
-                      <div>
-                        <Label>Notification Preferences</Label>
-                        <div className="space-y-2 mt-1">
-                          <div className="flex items-center space-x-2">
-                            <Switch 
-                              id={`edit_email_pref_${contact.id}`} 
-                              checked={formData.notification_preferences?.email || false}
-                              onCheckedChange={() => handleTogglePreference('email')}
-                            />
-                            <Label htmlFor={`edit_email_pref_${contact.id}`}>Email Notifications</Label>
-                          </div>
-                          <div className="flex items-center space-x-2">
-                            <Switch 
-                              id={`edit_sms_pref_${contact.id}`} 
-                              checked={formData.notification_preferences?.sms || false}
-                              onCheckedChange={() => handleTogglePreference('sms')}
-                            />
-                            <Label htmlFor={`edit_sms_pref_${contact.id}`}>SMS Notifications</Label>
-                          </div>
-                        </div>
+                      <div className="mt-2 flex gap-2">
+                        {contact.notification_preferences.email && (
+                          <Badge variant="outline">Email Notifications</Badge>
+                        )}
+                        {contact.notification_preferences.sms && (
+                          <Badge variant="outline">SMS Notifications</Badge>
+                        )}
                       </div>
                     </div>
-                    
-                    <div className="flex justify-end space-x-2">
+                    <div className="flex space-x-2">
                       <Button 
+                        size="sm" 
                         variant="outline" 
-                        size="sm"
-                        onClick={() => setIsEditing(null)}
+                        onClick={() => {
+                          setSelectedContact(contact);
+                          setIsEditing(true);
+                        }}
                       >
-                        <X className="h-4 w-4 mr-1" />
-                        Cancel
+                        Edit
                       </Button>
                       <Button 
-                        size="sm"
-                        onClick={() => handleUpdateContact(contact.id)}
+                        size="sm" 
+                        variant="destructive" 
+                        onClick={() => handleDeleteContact(contact.id)}
                       >
-                        <Check className="h-4 w-4 mr-1" />
-                        Save
+                        Delete
+                      </Button>
+                      <Button 
+                        size="sm" 
+                        variant="outline" 
+                        onClick={() => handleSendTestNotification(contact)}
+                        disabled={loading}
+                      >
+                        Test
                       </Button>
                     </div>
                   </div>
-                ) : (
-                  <>
-                    <div className="flex justify-between items-start">
-                      <div>
-                        <h4 className="font-medium">{contact.name}</h4>
-                        <p className="text-sm text-muted-foreground">Student ID: {contact.student_id}</p>
-                      </div>
-                      <div className="flex space-x-1">
-                        <Button 
-                          variant="ghost" 
-                          size="sm" 
-                          onClick={() => handleSendTest(contact)}
-                        >
-                          Test
-                        </Button>
-                        <Button 
-                          variant="ghost" 
-                          size="icon"
-                          onClick={() => handleEdit(contact)}
-                        >
-                          <Pencil className="h-4 w-4" />
-                        </Button>
-                        <Button 
-                          variant="ghost" 
-                          size="icon"
-                          onClick={() => handleDeleteContact(contact.id)}
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      </div>
-                    </div>
-                    
-                    <Separator className="my-2" />
-                    
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-sm">
-                      <div>
-                        <span className="font-medium">Email: </span>
-                        {contact.email || 'N/A'}
-                      </div>
-                      <div>
-                        <span className="font-medium">Phone: </span>
-                        {contact.phone || 'N/A'}
-                      </div>
-                      <div>
-                        <span className="font-medium">Email Notifications: </span>
-                        {contact.notification_preferences?.email ? 'Enabled' : 'Disabled'}
-                      </div>
-                      <div>
-                        <span className="font-medium">SMS Notifications: </span>
-                        {contact.notification_preferences?.sms ? 'Enabled' : 'Disabled'}
-                      </div>
-                    </div>
-                  </>
-                )}
-              </div>
-            ))}
-          </div>
-        ) : (
-          <div className="text-center py-6 text-muted-foreground">
-            No parent contacts found. Add a new contact to get started.
-          </div>
-        )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
       </CardContent>
     </Card>
   );
