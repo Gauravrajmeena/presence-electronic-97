@@ -176,39 +176,3 @@ export async function recordAttendance(
     throw error;
   }
 }
-
-// New function to mark students as absent
-export async function markAsAbsent(userId: string, date?: Date): Promise<any> {
-  try {
-    const timestamp = date ? date.toISOString() : new Date().toISOString();
-    const deviceInfo = {
-      type: 'system',
-      timestamp,
-      automatic: true
-    };
-    
-    console.log(`Marking user ${userId} as absent for ${timestamp}`);
-    
-    const { data, error } = await supabase
-      .from('attendance_records')
-      .insert({
-        user_id: userId,
-        timestamp,
-        status: 'absent',
-        device_info: deviceInfo,
-      })
-      .select()
-      .single();
-    
-    if (error) {
-      console.error('Error marking absent:', error);
-      throw new Error(`Failed to mark student as absent: ${error.message}`);
-    }
-    
-    console.log('Student marked as absent:', data);
-    return data;
-  } catch (error) {
-    console.error('Error in markAsAbsent:', error);
-    throw error;
-  }
-}
