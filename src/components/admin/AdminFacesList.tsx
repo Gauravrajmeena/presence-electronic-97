@@ -1,10 +1,11 @@
+
 import React, { useState, useEffect } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/integrations/supabase/client';
-import { Search, User, UserCheck, Calendar, MoreVertical, Clock } from 'lucide-react';
+import { Search, User, UserCheck, Calendar, MoreVertical } from 'lucide-react';
 import { 
   DropdownMenu,
   DropdownMenuContent,
@@ -13,8 +14,6 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Dialog, DialogTrigger, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
-import { format } from 'date-fns';
 
 interface AdminFacesListProps {
   viewMode: 'grid' | 'list';
@@ -43,9 +42,6 @@ const AdminFacesList: React.FC<AdminFacesListProps> = ({
   const [faces, setFaces] = useState<RegisteredFace[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [attendanceCounts, setAttendanceCounts] = useState<Record<string, number>>({});
-  const [selectedAttendanceId, setSelectedAttendanceId] = useState<string | null>(null);
-  const [newTime, setNewTime] = useState('');
-  const [isTimeDialogOpen, setIsTimeDialogOpen] = useState(false);
 
   const filteredFaces = faces.filter(face => 
     face.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -186,96 +182,6 @@ const AdminFacesList: React.FC<AdminFacesListProps> = ({
     }
   };
 
-  const handleAdjustTime = async (attendanceId: string) => {
-    try {
-      if (!newTime) {
-        toast({
-          title: "Error",
-          description: "Please select a time",
-          variant: "destructive"
-        });
-        return;
-      }
-
-      const { data: record, error: fetchError } = await supabase
-        .from('attendance_records')
-        .select('*')
-        .eq('id', attendanceId)
-        .single();
-
-      if (fetchError) throw fetchError;
-      
-      if (!record) {
-        throw new Error('Record not found');
-      }
-
-      const currentDate = new Date(record.timestamp || new Date());
-      
-      const [hours, minutes] = newTime.split(':').map(Number);
-      currentDate.setHours(hours, minutes);
-      
-      const isLate = hours > 9 || (hours === 9 && minutes > 0);
-      
-      const { error: updateError } = await supabase
-        .from('attendance_records')
-        .update({ 
-          timestamp: currentDate.toISOString(),
-          status: isLate ? 'late' : 'present'
-        })
-        .eq('id', attendanceId);
-
-      if (updateError) throw updateError;
-
-      toast({
-        title: "Success",
-        description: `Attendance time adjusted${isLate ? ' and marked as late' : ''}`,
-        variant: "default"
-      });
-
-      setIsTimeDialogOpen(false);
-      
-      await fetchRegisteredFaces();
-    } catch (error) {
-      console.error('Error adjusting time:', error);
-      toast({
-        title: "Error",
-        description: "Failed to adjust attendance time",
-        variant: "destructive"
-      });
-    }
-  };
-
-  const openTimeDialog = (id: string) => {
-    const fetchLatestTime = async () => {
-      try {
-        const { data, error } = await supabase
-          .from('attendance_records')
-          .select('timestamp')
-          .eq('id', id)
-          .single();
-          
-        if (error) throw error;
-        
-        if (data && data.timestamp) {
-          const latestTime = new Date(data.timestamp);
-          setNewTime(format(latestTime, 'HH:mm'));
-          console.log('Fetched latest time:', format(latestTime, 'HH:mm'));
-        } else {
-          setNewTime('09:00');
-          console.log('No timestamp found, using default 09:00');
-        }
-      } catch (err) {
-        console.error('Error fetching latest time:', err);
-        setNewTime('09:00');
-      } finally {
-        setSelectedAttendanceId(id);
-        setIsTimeDialogOpen(true);
-      }
-    };
-    
-    fetchLatestTime();
-  };
-
   if (isLoading) {
     return (
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -361,13 +267,6 @@ const AdminFacesList: React.FC<AdminFacesListProps> = ({
                         </Button>
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="end">
-                        <DropdownMenuItem onClick={(e) => {
-                          e.stopPropagation();
-                          openTimeDialog(face.id);
-                        }}>
-                          <Clock className="mr-2 h-4 w-4" />
-                          Adjust Attendance Time
-                        </DropdownMenuItem>
                         <DropdownMenuItem onClick={(e) => {
                           e.stopPropagation();
                           handleDeleteFace(face.id);
@@ -464,13 +363,6 @@ const AdminFacesList: React.FC<AdminFacesListProps> = ({
                         <DropdownMenuContent align="end">
                           <DropdownMenuItem onClick={(e) => {
                             e.stopPropagation();
-                            openTimeDialog(face.id);
-                          }}>
-                            <Clock className="mr-2 h-4 w-4" />
-                            Adjust Attendance Time
-                          </DropdownMenuItem>
-                          <DropdownMenuItem onClick={(e) => {
-                            e.stopPropagation();
                             handleDeleteFace(face.id);
                           }}>
                             Delete
@@ -485,47 +377,6 @@ const AdminFacesList: React.FC<AdminFacesListProps> = ({
           </div>
         </div>
       )}
-
-      <Dialog 
-        open={isTimeDialogOpen} 
-        onOpenChange={(open) => {
-          if (!open) {
-            setIsTimeDialogOpen(false);
-            setSelectedAttendanceId(null);
-          }
-        }}
-      >
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Adjust Attendance Time</DialogTitle>
-          </DialogHeader>
-          <div className="py-4">
-            <label htmlFor="time-input" className="block text-sm font-medium mb-2">
-              New attendance time:
-            </label>
-            <Input
-              id="time-input"
-              type="time"
-              value={newTime}
-              onChange={(e) => setNewTime(e.target.value)}
-              className="w-full"
-            />
-            <p className="mt-2 text-sm text-muted-foreground">
-              Students will be marked as late if attendance time is after 9:00 AM.
-            </p>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setIsTimeDialogOpen(false)}>
-              Cancel
-            </Button>
-            <Button 
-              onClick={() => selectedAttendanceId && handleAdjustTime(selectedAttendanceId)}
-            >
-              Save Changes
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 };
