@@ -6,7 +6,6 @@ import { Calendar } from '@/components/ui/calendar';
 import { format } from 'date-fns';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
-import { Switch } from '@/components/ui/switch';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { toast } from 'sonner';
@@ -62,7 +61,8 @@ const AbsenteeNotifier = () => {
 
       if (error) throw error;
       
-      setNotificationLogs(data as NotificationLog[] || []);
+      // Explicitly cast to NotificationLog[] to fix type errors
+      setNotificationLogs((data || []) as unknown as NotificationLog[]);
     } catch (error) {
       console.error('Error fetching notification logs:', error);
     } finally {

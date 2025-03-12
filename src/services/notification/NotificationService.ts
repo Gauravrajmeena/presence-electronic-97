@@ -33,6 +33,7 @@ export async function sendAbsenceNotification(
       return false;
     }
     
+    // Explicitly cast to ParentContact and handle notification preferences
     const parentContact = contactData as unknown as ParentContact;
     
     // Prepare notification payload

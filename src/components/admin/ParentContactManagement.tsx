@@ -6,7 +6,6 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Badge } from '@/components/ui/badge';
-import { Switch } from '@/components/ui/switch';
 import { toast } from 'sonner';
 import { supabase } from '@/integrations/supabase/client';
 import { sendTestNotification } from '@/services/notification/NotificationService';
@@ -41,13 +40,26 @@ const ParentContactManagement = () => {
 
       if (error) throw error;
 
-      // Parse notification preferences for each contact
-      const parsedContacts = data?.map(contact => ({
-        ...contact,
-        notification_preferences: parseNotificationPreferences(contact.notification_preferences)
-      })) as ParentContact[];
+      // Process data with type safety
+      const parsedContacts: ParentContact[] = [];
+      if (data && Array.isArray(data)) {
+        for (const contact of data) {
+          try {
+            parsedContacts.push({
+              id: contact.id,
+              student_id: contact.student_id,
+              name: contact.name,
+              email: contact.email,
+              phone: contact.phone,
+              notification_preferences: parseNotificationPreferences(contact.notification_preferences)
+            });
+          } catch (err) {
+            console.error('Error parsing contact:', err);
+          }
+        }
+      }
       
-      setContacts(parsedContacts || []);
+      setContacts(parsedContacts);
     } catch (error) {
       console.error('Error fetching parent contacts:', error);
       toast.error('Failed to load parent contacts');
@@ -69,7 +81,7 @@ const ParentContactManagement = () => {
           email: newContact.email,
           phone: newContact.phone,
           notification_preferences: newContact.notification_preferences
-        } as any);
+        });
 
       if (error) throw error;
 
@@ -107,7 +119,7 @@ const ParentContactManagement = () => {
           email: selectedContact.email,
           phone: selectedContact.phone,
           notification_preferences: selectedContact.notification_preferences
-        } as any)
+        })
         .eq('id', selectedContact.id);
 
       if (error) throw error;
